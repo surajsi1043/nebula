@@ -1,8 +1,32 @@
 // @ts-ignore
 import { GoogleGenerativeAI } from "@google/generative-ai";
 import { NextResponse } from "next/server";
+import * as pdfjs from "pdfjs-dist/legacy/build/pdf.mjs";
 
 const genAI = new GoogleGenerativeAI(process.env.GEMINI_API_KEY || "");
+
+async function extractTextFromPDF(buffer: Buffer): Promise<string> {
+  const Uint8ArrayBuffer = new Uint8Array(buffer);
+  const loadingTask = pdfjs.getDocument({
+    data: Uint8ArrayBuffer,
+    useSystemFonts: true,
+    disableFontFace: true,
+    verbosity: 0, 
+  });
+
+  const pdf = await loadingTask.promise;
+  let fullText = "";
+
+  for (let i = 1; i <= pdf.numPages; i++) {
+    const page = await pdf.getPage(i);
+    const textContent = await page.getTextContent();
+    const pageText = textContent.items
+      .map((item: any) => item.str)
+      .join(" ");
+    fullText += pageText + "\n";
+  }
+  return fullText;
+}
 
 export async function POST(req: Request) {
   try {
@@ -14,20 +38,13 @@ export async function POST(req: Request) {
       return NextResponse.json({ error: "Missing resume or JD" }, { status: 400 });
     }
 
-    // 1. Use dynamic import which handles Turbopack/ESM interop better
-    const pdfParseModule = await import("pdf-parse/lib/pdf-parse.js");
-    
-    // 2. Access the function (usually sits on the 'default' or is the module itself)
-    const pdf = pdfParseModule.default || pdfParseModule;
-
     const bytes = await file.arrayBuffer();
     const buffer = Buffer.from(bytes);
-    
-    // 3. Extract text
-    const pdfData = await pdf(buffer);
-    const resume_text = pdfData.text;
+    const resume_text = await extractTextFromPDF(buffer);
 
-    const model = genAI.getGenerativeModel({ model: "gemini-1.5-flash" });
+    // FIXED: Use a supported 2026 model identifier. 
+    // "gemini-1.5-flash" is retired; use "gemini-2.5-flash" or "gemini-3-flash".
+    const model = genAI.getGenerativeModel({ model: "gemini-2.5-flash" });
 
     const prompt = `
       You are an expert Indian Technical Recruiter. Analyze this resume against the Job Description (JD).
@@ -42,20 +59,19 @@ export async function POST(req: Request) {
         "indian_market_tips": ["specific advice for Indian market like notice period, CGPA, etc."],
         "verdict": "Strong Match" | "Moderate Match" | "Weak Match"
       }
-      
-      Contextual Requirements for India:
-      1. Notice Period: Check if they are an "Immediate Joiner".
-      2. Education: Understand CGPA vs Percentage for Tier-1/2 colleges.
-      3. Company: Understand Service-based vs Product-based context.
     `;
 
     const result = await model.generateContent(prompt);
     const responseText = result.response.text();
-    const cleanedJson = responseText.replace(/```json|```/g, "");
+    const cleanedJson = responseText.replace(/```json|```/g, "").trim();
     
     return NextResponse.json(JSON.parse(cleanedJson));
-  } catch (error) {
+  } catch (error: any) {
     console.error("Analysis error:", error);
-    return NextResponse.json({ error: "Failed to analyze resume" }, { status: 500 });
+    // Enhanced error reporting to distinguish between 404 (retired model) and 429 (quota)
+    return NextResponse.json(
+      { error: `AI Analysis failed: ${error.message || "Unknown error"}` }, 
+      { status: error.status || 500 }
+    );
   }
 }
