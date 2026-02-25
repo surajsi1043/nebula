@@ -1,13 +1,31 @@
-    import { GoogleGenerativeAI } from "@google/generative-ai";
+// @ts-ignore
+import pdf from "pdf-parse";
+import { GoogleGenerativeAI } from "@google/generative-ai";
 import { NextResponse } from "next/server";
+// Replace line 3 with this:
+const pdf = require("pdf-parse");
 
 const genAI = new GoogleGenerativeAI(process.env.GEMINI_API_KEY || "");
 
 export async function POST(req: Request) {
   try {
-    const { resume_text, jd_text } = await req.json();
+    const formData = await req.formData();
+    const file = formData.get("resume") as File;
+    const jd_text = formData.get("jd_text") as string;
 
-    const model = genAI.getGenerativeModel({ model: "gemini-1.5-flash" }); // Using Flash for speed [cite: 48]
+    if (!file || !jd_text) {
+      return NextResponse.json({ error: "Missing resume or JD" }, { status: 400 });
+    }
+
+    // Convert File to Buffer for pdf-parse [cite: 275, 293]
+    const bytes = await file.arrayBuffer();
+    const buffer = Buffer.from(bytes);
+    
+    // Extract text from PDF [cite: 275, 319]
+    const pdfData = await pdf(buffer);
+    const resume_text = pdfData.text;
+
+    const model = genAI.getGenerativeModel({ model: "gemini-1.5-flash" }); // [cite: 288]
 
     const prompt = `
       You are an expert Indian Technical Recruiter. Analyze this resume against the Job Description (JD).
@@ -23,10 +41,10 @@ export async function POST(req: Request) {
         "verdict": "Strong Match" | "Moderate Match" | "Weak Match"
       }
       
-      Contextual Requirements for India[cite: 18, 21, 22]:
-      1. Notice Period: Check if they are an "Immediate Joiner"[cite: 21].
-      2. Education: Understand CGPA vs Percentage for Tier-1/2 colleges[cite: 22].
-      3. Company: Understand Service-based vs Product-based context[cite: 23].
+      Contextual Requirements for India:
+      1. Notice Period: Check if they are an "Immediate Joiner"[cite: 261].
+      2. Education: Understand CGPA vs Percentage for Tier-1/2 colleges[cite: 262].
+      3. Company: Understand Service-based vs Product-based context[cite: 263].
     `;
 
     const result = await model.generateContent(prompt);
@@ -35,6 +53,7 @@ export async function POST(req: Request) {
     
     return NextResponse.json(JSON.parse(cleanedJson));
   } catch (error) {
-    return NextResponse.json({ error: "Failed to analyze resume" }, { status: 500 });
+    console.error("Analysis error:", error);
+    return NextResponse.json({ error: "Failed to analyze resume" }, { status: 500 }); // [cite: 318]
   }
 }
