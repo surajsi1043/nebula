@@ -1,9 +1,9 @@
 // @ts-ignore
-import pdf from "pdf-parse";
 import { GoogleGenerativeAI } from "@google/generative-ai";
 import { NextResponse } from "next/server";
-// Replace line 3 with this:
-const pdf = require("pdf-parse");
+
+// Use require to avoid ESM default export issues with this specific library
+const pdf = require("pdf-parse"); 
 
 const genAI = new GoogleGenerativeAI(process.env.GEMINI_API_KEY || "");
 
