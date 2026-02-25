@@ -2,9 +2,6 @@
 import { GoogleGenerativeAI } from "@google/generative-ai";
 import { NextResponse } from "next/server";
 
-// Use require to avoid ESM default export issues with this specific library
-const pdf = require("pdf-parse"); 
-
 const genAI = new GoogleGenerativeAI(process.env.GEMINI_API_KEY || "");
 
 export async function POST(req: Request) {
@@ -17,15 +14,20 @@ export async function POST(req: Request) {
       return NextResponse.json({ error: "Missing resume or JD" }, { status: 400 });
     }
 
-    // Convert File to Buffer for pdf-parse [cite: 275, 293]
+    // 1. Use dynamic import which handles Turbopack/ESM interop better
+    const pdfParseModule = await import("pdf-parse/lib/pdf-parse.js");
+    
+    // 2. Access the function (usually sits on the 'default' or is the module itself)
+    const pdf = pdfParseModule.default || pdfParseModule;
+
     const bytes = await file.arrayBuffer();
     const buffer = Buffer.from(bytes);
     
-    // Extract text from PDF [cite: 275, 319]
+    // 3. Extract text
     const pdfData = await pdf(buffer);
     const resume_text = pdfData.text;
 
-    const model = genAI.getGenerativeModel({ model: "gemini-1.5-flash" }); // [cite: 288]
+    const model = genAI.getGenerativeModel({ model: "gemini-1.5-flash" });
 
     const prompt = `
       You are an expert Indian Technical Recruiter. Analyze this resume against the Job Description (JD).
@@ -42,9 +44,9 @@ export async function POST(req: Request) {
       }
       
       Contextual Requirements for India:
-      1. Notice Period: Check if they are an "Immediate Joiner"[cite: 261].
-      2. Education: Understand CGPA vs Percentage for Tier-1/2 colleges[cite: 262].
-      3. Company: Understand Service-based vs Product-based context[cite: 263].
+      1. Notice Period: Check if they are an "Immediate Joiner".
+      2. Education: Understand CGPA vs Percentage for Tier-1/2 colleges.
+      3. Company: Understand Service-based vs Product-based context.
     `;
 
     const result = await model.generateContent(prompt);
@@ -54,6 +56,6 @@ export async function POST(req: Request) {
     return NextResponse.json(JSON.parse(cleanedJson));
   } catch (error) {
     console.error("Analysis error:", error);
-    return NextResponse.json({ error: "Failed to analyze resume" }, { status: 500 }); // [cite: 318]
+    return NextResponse.json({ error: "Failed to analyze resume" }, { status: 500 });
   }
 }
